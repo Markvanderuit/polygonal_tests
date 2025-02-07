@@ -39,7 +39,7 @@ namespace prg {
     | gl::WindowFlags::eMSAA prg_debug_insert(| gl::WindowFlags::eDebug); 
   
   // Initial polygonal data layout
-  std::vector<eig::Array2f> verts = {
+  std::vector<eig::Vector2f> verts = {
     eig::Array2f { .25, .5 },
     eig::Array2f { .5, .25 },
     eig::Array2f { .75, .5 },
@@ -52,20 +52,22 @@ namespace prg {
     eig::AlArray3f { 1, 1, 0 }
   };
 
+
+  // Method settings flags
   enum class Method : uint {
     eBarycentric     = 0,
     eMeanValueCoords = 1
   };
 
-  // Unnamed settings object pushed through uniform data
+  // Unnamed settings object, pushed to shaders through uniform data
   struct {
-    alignas(16) bool   draw_exterior = false;
-    alignas(16) Method draw_method   = Method::eBarycentric;
+    alignas(16) eig::Matrix4f projection;
+    alignas(16) bool          draw_lines  = false;
+    alignas(16) Method        draw_method = Method::eBarycentric;
   } settings;
-
-  gl::Window window;
-
+  
   // Draw objects
+  gl::Window  window;
   gl::Array   default_array; // Empty VAO as we'll be doing vertex pulling
   gl::Program polygon_program;
   gl::Program mvc_program;
@@ -105,22 +107,37 @@ namespace prg {
     const auto &io          = ImGui::GetIO();
     eig::Vector2f mouse_pos = io.MousePos;
 
-    
-
-    // Spawn small settings window
+    // Spawn small settings/vertex config window
     if (ImGui::Begin("ImGui")) {
       ImGui::SeparatorText("Settings");
 
       bool is_mvc = (settings.draw_method == Method::eMeanValueCoords);
-      ImGui::Checkbox("Draw exterior", &settings.draw_exterior);
       ImGui::Checkbox("Draw mean value coords", &is_mvc);
+      if (is_mvc)
+        ImGui::Checkbox("Draw grid lines", &settings.draw_lines);
       settings.draw_method = is_mvc ? Method::eMeanValueCoords : Method::eBarycentric;
       
       ImGui::SeparatorText("Vertices");
 
       if (ImGui::Button("Add vertex")) {
-        verts.push_back(eig::Array2f(0.5));
-        colrs.push_back(eig::Array3f(0.5));
+        // Search for longest edge
+        float edge_l = (verts[1] - verts[0]).norm();
+        uint  vert_i = 0;
+        for (uint i = 0; i < verts.size(); ++i) {
+          float edge_l_ = (verts[(i + 1) % verts.size()] - verts[i]).norm();
+          guard_continue(edge_l_ > edge_l);
+          edge_l = edge_l_;
+          vert_i = i;
+        }
+        fmt::print("{}\n", vert_i);
+        
+        // Generate spliting vertex on longest edge
+        auto vert = (.5f * verts[vert_i].array() + .5f * verts[(vert_i + 1) % verts.size()].array()).eval();
+        auto colr = (.5f * colrs[vert_i].array() + .5f * colrs[(vert_i + 1) % verts.size()].array()).eval();
+        
+        // Insert splitting vertex in between vertices of longest edge
+        verts.insert(verts.begin() + vert_i + 1, vert);
+        colrs.insert(colrs.begin() + vert_i + 1, colr);
       }
       
       // List of vertex color data
@@ -138,12 +155,12 @@ namespace prg {
           // Position column
           ImGui::TableSetColumnIndex(0);
           ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-          ImGui::InputFloat2("##data_vert", verts[i].data(), "%.2f");
+          ImGui::DragFloat2("##data_vert", verts[i].data(), .05f);
 
           // Color column
           ImGui::TableSetColumnIndex(1);
           ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-          ImGui::ColorEdit3("##data_colr", colrs[i].data(), ImGuiColorEditFlags_InputRGB);
+          ImGui::ColorEdit3("##data_colr", colrs[i].data(), ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_InputRGB);
 
           ImGui::TableSetColumnIndex(2);
           if (ImGui::Button("X")) {
@@ -163,10 +180,16 @@ namespace prg {
 
     // Handle gizmo input to move vertices
     {
-      // Iterate polygon vertices; find close mouseover candidate
+      // Projection matrix
+      float aspect = static_cast<float>(window.framebuffer_size().x())
+                  / static_cast<float>(window.framebuffer_size().y());
+      auto proj = eig::ortho(-aspect, aspect, -1.f, 1.f, -1.f, 1.f);
+
+      // Iterate polygon vertices; find closest mouseover candidate
       vert_mouseover = { };
       for (uint i = 0; i < verts.size(); ++i) {
-        eig::Vector2f p = eig::screen_to_window_space(verts[i], { 0, 0 }, window.window_size().cast<float>().eval());
+        auto v = (eig::Vector3f() << verts[i].array() * 2.f - 1.f, 0).finished();
+        auto p = eig::world_to_window_space(v, proj, { 0, 0 }, window.window_size().cast<float>().eval());
         guard_continue((p - mouse_pos).norm() <= 8.f);
         vert_mouseover = i;
       }
@@ -205,15 +228,21 @@ namespace prg {
 
     // Generate aligned block of color data
     std::vector<eig::AlArray3f> colrs_aligned(range_iter(colrs));
+    
+    // Update projection matrix
+    float aspect = static_cast<float>(window.framebuffer_size().x())
+                 / static_cast<float>(window.framebuffer_size().y());
+    settings.projection = eig::ortho(-aspect, aspect, -1.f, 1.f, -1.f, 1.f).matrix();
 
-    // Push fresh vertex/element/color data to new buffers;
+    // Push fresh vertex/element/color/settings data to new buffers;
     // we're eating the cost of per-frame buffer creation for simplicity
     gl::Buffer polygon_elems   = {{ .data = cnt_span<const std::byte>(elems)         }};
     gl::Buffer polygon_verts   = {{ .data = cnt_span<const std::byte>(verts)         }};
     gl::Buffer polygon_colrs   = {{ .data = cnt_span<const std::byte>(colrs_aligned) }};
     gl::Buffer settings_buffer = {{ .data = obj_span<const std::byte>(settings)      }};
 
-    // Declare fresh VAO assembling polygon buffers
+    // Declare fresh VAO assembling polygon buffers;
+    // we're eating the cost of per-frame VAO creation for simplicity
     gl::Array polygon_array = {{
       .buffers  = {{ .buffer = &polygon_verts, .index = 0, .stride = sizeof(eig::Vector2f)  },
                    { .buffer = &polygon_colrs, .index = 1, .stride = sizeof(eig::Vector4f)  }},
@@ -234,6 +263,10 @@ namespace prg {
 
     // Draw fullscreen quad, which generates the MVC background
     if (settings.draw_method == Method::eBarycentric) {
+      // Bind relevant resources using program names
+      bary_program.bind("b_buffer_settings", settings_buffer);
+
+      // Submit draw info
       gl::dispatch_draw({ 
         .type             = gl::PrimitiveType::eTriangles, 
         .vertex_count     = static_cast<uint>(elems.size()) * 3,
@@ -250,9 +283,9 @@ namespace prg {
       // Submit draw info
       gl::dispatch_draw({ 
         .type             = gl::PrimitiveType::eTriangleStrip, 
-        .vertex_count     = 4,
+        .vertex_count     = static_cast<uint>(elems.size()) * 3,
         .draw_op          = gl::DrawOp::eFill,
-        .bindable_array   = &default_array,
+        .bindable_array   = &polygon_array,
         .bindable_program = &mvc_program
       });
     } else {
@@ -261,6 +294,10 @@ namespace prg {
 
     // Draw polygon lines over background
     {
+      // Bind relevant resources using program names
+      polygon_program.bind("b_buffer_settings", settings_buffer);
+
+      // Submit draw info
       gl::dispatch_draw({ 
         .type             = gl::PrimitiveType::eTriangles, 
         .vertex_count     = static_cast<uint>(elems.size()) * 3,
