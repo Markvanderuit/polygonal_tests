@@ -41,7 +41,7 @@ float[N_MAX] mvc(vec2 p) {
   float weights_sum = 0.0;
 
   // Actual polytope size is buffer size
-  const uint n = verts.data.length();
+  int n = min(verts.data.length(), int(N_MAX));
 
   // Iterate polytope vertices
   for (int i = 0; i < n; i++) {
@@ -51,7 +51,7 @@ float[N_MAX] mvc(vec2 p) {
     vec2 vt_next = verts.data[(i + 1    ) % n];
 
     // Floater's paper, listing 2.1
-    /* {
+    {
       // Get unit vector (p -> vt_curr) and retain vector length
       vec2 dir_curr = vt_curr - p;
       float nrm_curr = length(dir_curr);
@@ -65,12 +65,12 @@ float[N_MAX] mvc(vec2 p) {
       float t_prev = tan(angle_prev * .5f);
       float t_next = tan(angle_next * .5f);
       weights[i] = (t_prev + t_next) / nrm_curr;
-    } */
+    }
 
     // Alternatively, Hormannm's paper, section 4's first listing;
     // does seem to show negative values in some concave cases,
     // but much nicer outside the polygon? Huh.
-    {
+    /* {
       // Compute necessary vectors from p to prev, center, next
       vec2 dir_curr = vt_curr - p;
       vec2 dir_next = vt_next - p;
@@ -85,7 +85,7 @@ float[N_MAX] mvc(vec2 p) {
       float t_prev = .5f * (nrm_curr * length(dir_prev) - dot(dir_curr, dir_prev)) / A_prev;
       float t_next = .5f * (nrm_curr * length(dir_next) - dot(dir_curr, dir_next)) / A_next;
       weights[i] = (t_prev + t_next) / nrm_curr;
-    }
+    } */
     
     // Cumulative sum
     weights_sum += weights[i];
@@ -105,11 +105,11 @@ float[N_MAX] mvc(vec2 p) {
 
 vec3 mvc_colr(in vec2 p) {
   float[N_MAX] weights = mvc(p);
-  const uint n = verts.data.length();
+  int n = min(verts.data.length(), int(N_MAX));
 
   vec3 colr = vec3(0.f);
 
-  for (uint i = 0; i < n; ++i) {
+  for (int i = 0; i < n; ++i) {
     // Grid lines, bad hack
     if (!settings.draw_lines || (settings.draw_lines && fract(weights[i] * 30) < 0.1))
       colr += weights[i] * colrs.data[i];

@@ -225,6 +225,7 @@ namespace prg {
   void draw_mean_value_coordinates() {
     // Triangulate the polygon on the fly; not a good or stable triangulation, but whatever
     auto elems = triangulate_polygon(cnt_span<const eig::Vector2f>(verts));
+    guard(!elems.empty());
 
     // Generate aligned block of color data
     std::vector<eig::AlArray3f> colrs_aligned(range_iter(colrs));

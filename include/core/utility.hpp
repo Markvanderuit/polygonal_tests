@@ -129,7 +129,7 @@ namespace prg {
                     const std::source_location sl = std::source_location::current()) {
       guard(!expr);
 
-      detail::Exception e;
+      dtl::Exception e;
       e.put("src", "dbg::check_expr(...) failed, expression evaluated to false");
       e.put("message", msg);
       e.put("in file", fmt::format("{}({}:{})", sl.file_name(), sl.line(), sl.column()));
