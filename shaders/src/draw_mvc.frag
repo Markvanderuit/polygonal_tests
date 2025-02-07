@@ -4,7 +4,7 @@
 layout(std140) uniform;
 layout(std430) buffer;
 
-// Storage buffer declarations; we'll be doing vertex pulling
+// Storage buffer declarations
 layout(binding = 0) restrict readonly buffer b_buffer_verts {
   vec2 data[];
 } verts;
@@ -14,13 +14,14 @@ layout(binding = 1) restrict readonly buffer b_buffer_colrs {
 
 // Uniform buffer declarations
 layout(binding = 0) uniform b_buffer_settings {
-  bool draw_exterior;
+  mat4 projection;
+  bool draw_lines;
+  uint draw_method;
 } settings;
 
-// Stage input/output declarations
+// Stage declarations
 layout(location = 0) in  vec2 in_value;
 layout(location = 0) out vec4 out_value;
-
 
 float cross_2d(vec2 a, vec2 b) {
     // return cross(vec3(a, 0), vec3(b, 0)).z;
@@ -44,44 +45,46 @@ float[N_MAX] mvc(vec2 p) {
 
     // Iterate polytope vertices
     for (int i = 0; i < n; i++) {
-      // Get current vertex, as well as prev/next vertices in polytope
-      vec2 vt      = verts.data[i];
+      // Get trio of vertices (current, left prev, right next)
+      vec2 vt_curr = verts.data[i];
       vec2 vt_prev = verts.data[(i - 1 + n) % n];
       vec2 vt_next = verts.data[(i + 1    ) % n];
 
       // Floater's paper, listing 2.1
       /* {
-        // Get unit vector (p -> vt), store length
-        vec2  vt_dir  = vt - p;
-        float vt_norm = distance(vt, p);
-        vt_dir /= vt_norm;
+        // Get unit vector (p -> vt_curr) and retain vector length
+        vec2 dir_curr = vt_curr - p;
+        float nrm_curr = length(dir_curr);
+        dir_curr /= nrm_curr;
 
-        // Get angles between (p -> vt) and (p -> prev/next)
-        float angle_prev = acos(dot(vt_dir, normalize(vt_prev - p)));
-        float angle_next = acos(dot(vt_dir, normalize(vt_next - p)));
+        // Get angles between (p -> vt_curr) and (p -> prev/next)
+        float angle_prev = acos(dot(dir_curr, normalize(vt_prev - p)));
+        float angle_next = acos(dot(dir_curr, normalize(vt_next - p)));
 
         // Compute w_i 
         float t_prev = tan(angle_prev * .5f);
         float t_next = tan(angle_next * .5f);
-        weights[i] = (t_prev + t_next) / vt_norm;
+        weights[i] = (t_prev + t_next) / nrm_curr;
       } */
 
-      // Alternatively, Hormannm's paper, section 4's first listing
+      // Alternatively, Hormannm's paper, section 4's first listing;
+      // does seem to show negative values in some concave cases,
+      // but much nicer outside the polygon? Huh.
       {
         // Compute necessary vectors from p to prev, center, next
-        vec2 dir_vt   = vt - p;
+        vec2 dir_curr = vt_curr - p;
         vec2 dir_next = vt_next - p;
         vec2 dir_prev = vt_prev - p;
-        float vt_norm = length(dir_vt);
+        float nrm_curr = length(dir_curr);
 
         // Compute areas of parallelograms (prev, center) and (center, next)
-        float A_prev = cross_2d(dir_vt, dir_prev);
-        float A_next = cross_2d(dir_next, dir_vt);
+        float A_prev = cross_2d(dir_curr, dir_prev);
+        float A_next = cross_2d(dir_next, dir_curr);
         
         // Compute w_i
-        float t_prev = .5f * (vt_norm * length(dir_prev) - dot(dir_vt, dir_prev)) / A_prev;
-        float t_next = .5f * (vt_norm * length(dir_next) - dot(dir_vt, dir_next)) / A_next;
-        weights[i] = (t_prev + t_next) / vt_norm;
+        float t_prev = .5f * (nrm_curr * length(dir_prev) - dot(dir_curr, dir_prev)) / A_prev;
+        float t_next = .5f * (nrm_curr * length(dir_next) - dot(dir_curr, dir_next)) / A_next;
+        weights[i] = (t_prev + t_next) / nrm_curr;
       }
       
       // Cumulative sum
@@ -107,14 +110,8 @@ vec3 mvc_colr(in vec2 p) {
   vec3 colr = vec3(0);
 
   for (uint i = 0; i < N; ++i) {
-    // Catch negative weights as being exterior
-    if (weights[i] < 0 && !settings.draw_exterior) {
-      colr = vec3(0);
-      return colr;
-    }
-    
     // Grid lines, bad hack
-    // if (fract(weights[i] * 30) < 0.1)
+    if (!settings.draw_lines || (settings.draw_lines && fract(weights[i] * 30) < 0.1))
       colr += weights[i] * colrs.data[i];
   }
 

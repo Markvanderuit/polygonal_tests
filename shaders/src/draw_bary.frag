@@ -1,6 +1,6 @@
 #include <preamble.glsl>
 
-// Stage input/output declarations
+// Stage declarations
 layout(location = 0) in  vec3 in_colr;
 layout(location = 0) out vec4 out_colr;
 
