@@ -78,21 +78,20 @@ namespace ImGui {
 
     float aspect = static_cast<float>(window.window_size().x())
                  / static_cast<float>(window.window_size().y());
-    fmt::print("aspect {}\n", aspect);
 
     // Specify ImGuizmo settings for current viewport and insert the gizmo
     ImGuizmo::SetRect(0, 0, window.window_size().x(), window.window_size().y());
     ImGuizmo::SetDrawlist(ImGui::GetForegroundDrawList());
 
     // Helper data
-    Eigen::Affine3f view = trf::Identity();
-    view = view * Eigen::Translation3f(Eigen::Array3f { -aspect, -1.f, 0.f });
-    view = view * Eigen::Scaling(2.f * aspect, 2.f, 1.f);
+    auto mode      = ImGuizmo::MODE::LOCAL;
     auto operation = ImGuizmo::OPERATION::TRANSLATE_X | ImGuizmo::OPERATION::TRANSLATE_Y;
-    auto orthogrph = Eigen::ortho(-aspect, aspect, -1.f, 1.f, -1, 1);
+    auto proj      = Eigen::ortho(-aspect, aspect, -1.f, 1.f, -1.f, 1.f);
+    auto view      = trf::Identity();
+    view = view * Eigen::Translation3f(Eigen::Array3f { -1.f, -1.f, 0.f });
+    view = view * Eigen::Scaling(2.f, 2.f, 1.f);
     
-    ImGuizmo::Manipulate(view.data(), orthogrph.data(), 
-      operation, ImGuizmo::MODE::LOCAL, m_init_trf.data(), m_delta_trf.data());
+    ImGuizmo::Manipulate(view.data(), proj.data(), operation, mode, m_init_trf.data(), m_delta_trf.data());
 
     guard(!m_is_active && ImGuizmo::IsUsing(), false);
     m_is_active = true;
