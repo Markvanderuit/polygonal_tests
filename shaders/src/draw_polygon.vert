@@ -1,5 +1,9 @@
 #include <preamble.glsl>
 
+// Buffer layout declarations
+layout(std140) uniform;
+layout(std430) buffer;
+
 // Stage declarations
 layout(location = 0) in  vec2 in_vert;
 
